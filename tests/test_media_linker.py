@@ -22,31 +22,22 @@
 # language governing permissions and limitations under the Apache License.
 #
 
-import unittest
 import os
+import unittest
 
-import baseline_reader
+from tests import baseline_reader
 
 import opentimelineio as otio
+from tests import utils
 
 LINKER_PATH = "media_linker_example"
-MANIFEST_PATH = "adapter_plugin_manifest.plugin_manifest"
-MAN_PATH = '/var/tmp/test_otio_manifest'
-
-
-def test_manifest():
-    full_baseline = baseline_reader.json_baseline_as_string(MANIFEST_PATH)
-
-    with open(MAN_PATH, 'w') as fo:
-        fo.write(full_baseline)
-    man = otio.plugins.manifest_from_file(MAN_PATH)
-    man._update_plugin_source(baseline_reader.path_to_baseline(MANIFEST_PATH))
-    return man
 
 
 class TestPluginMediaLinker(unittest.TestCase):
     def setUp(self):
-        self.man = test_manifest()
+        self.bak = otio.plugins.ActiveManifest()
+        self.man = utils.create_manifest()
+        otio.plugins.manifest._MANIFEST = self.man
         self.jsn = baseline_reader.json_baseline_as_string(LINKER_PATH)
         self.mln = otio.adapters.otio_json.read_from_string(self.jsn)
         self.mln._json_path = os.path.join(
@@ -54,6 +45,10 @@ class TestPluginMediaLinker(unittest.TestCase):
             "baselines",
             LINKER_PATH
         )
+
+    def tearDown(self):
+        otio.plugins.manifest._MANIFEST = self.bak
+        utils.remove_manifest(self.man)
 
     def test_plugin_adapter(self):
         self.assertEqual(self.mln.name, "example")
@@ -75,7 +70,7 @@ class TestPluginMediaLinker(unittest.TestCase):
         cl = otio.schema.Clip(name="foo")
 
         linked_mr = self.mln.link_media_reference(cl, {"extra_data": True})
-        self.assertIsInstance(linked_mr, otio.media_reference.MissingReference)
+        self.assertIsInstance(linked_mr, otio.schema.MissingReference)
         self.assertEqual(linked_mr.name, cl.name + "_tweaked")
         self.assertEqual(linked_mr.metadata.get("extra_data"), True)
 
@@ -101,3 +96,22 @@ class TestPluginMediaLinker(unittest.TestCase):
                 repr(self.mln.filepath)
             )
         )
+
+    def test_available_media_linker_names(self):
+        # for now just assert that it returns a non-empty list
+        self.assertTrue(otio.media_linker.available_media_linker_names())
+
+    def test_default_media_linker(self):
+        os.environ['OTIO_DEFAULT_MEDIA_LINKER'] = 'foo'
+        self.assertEqual(otio.media_linker.default_media_linker(), 'foo')
+        with self.assertRaises(otio.exceptions.NoDefaultMediaLinkerError):
+            del os.environ['OTIO_DEFAULT_MEDIA_LINKER']
+            otio.media_linker.default_media_linker()
+
+    def test_from_name_fail(self):
+        with self.assertRaises(otio.exceptions.NotSupportedError):
+            otio.media_linker.from_name("should not exist")
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -22,7 +22,7 @@
 # language governing permissions and limitations under the Apache License.
 #
 
-"""Serializer for SerializeableObjects to JSON
+"""Serializer for SerializableObjects to JSON
 
 Used for the otio_json adapter as well as for plugins and manifests.
 """
@@ -30,9 +30,11 @@ Used for the otio_json adapter as well as for plugins and manifests.
 import json
 
 from . import (
-    SerializeableObject,
+    SerializableObject,
     type_registry,
 )
+
+from .unknown_schema import UnknownSchema
 
 from .. import (
     exceptions,
@@ -43,33 +45,33 @@ from .. import (
 # @TODO: Handle file version drifting
 
 
-class _SerializeableObjectEncoder(json.JSONEncoder):
+class _SerializableObjectEncoder(json.JSONEncoder):
 
-    """ Encoder for the SerializeableObject OTIO Class and its descendents. """
+    """ Encoder for the SerializableObject OTIO Class and its descendents. """
 
     def default(self, obj):
-        for typename, encfn in _ENCODER_MAP.items():
+        for typename, encfn in _ENCODER_LIST:
             if isinstance(obj, typename):
                 return encfn(obj)
 
         return json.JSONEncoder.default(self, obj)
 
 
-def serialize_json_to_string(root, sort_keys=True, indent=4):
-    """Serialize a tree of SerializeableObject to JSON.
+def serialize_json_to_string(root, indent=4):
+    """Serialize a tree of SerializableObject to JSON.
 
     Returns a JSON string.
     """
 
-    return _SerializeableObjectEncoder(
-        sort_keys=sort_keys,
+    return _SerializableObjectEncoder(
+        sort_keys=True,
         indent=indent
     ).encode(root)
 
 
 def serialize_json_to_file(root, to_file):
     """
-    Serialize a tree of SerializeableObject to JSON.
+    Serialize a tree of SerializableObject to JSON.
 
     Writes the result to the given file path.
     """
@@ -82,15 +84,29 @@ def serialize_json_to_file(root, to_file):
 # @{ Encoders
 
 
-def _encoded_serializeable_object(input_otio):
-    if not input_otio._serializeable_label:
-        raise exceptions.InvalidSerializeableLabelError(
-            input_otio._serializeable_label
+def _encoded_serializable_object(input_otio):
+    if not input_otio._serializable_label:
+        raise exceptions.InvalidSerializableLabelError(
+            input_otio._serializable_label
         )
     result = {
-        "OTIO_SCHEMA": input_otio._serializeable_label,
+        "OTIO_SCHEMA": input_otio._serializable_label,
     }
+    result.update(input_otio._data)
+    return result
+
+
+def _encoded_unknown_schema_object(input_otio):
+    orig_label = input_otio.data.get(UnknownSchema._original_label)
+    if not orig_label:
+        raise exceptions.InvalidSerializableLabelError(
+            orig_label
+        )
+    # result is just a dict, not a SerializableObject
+    result = {}
     result.update(input_otio.data)
+    result["OTIO_SCHEMA"] = orig_label  # override the UnknownSchema label
+    del result[UnknownSchema._original_label]
     return result
 
 
@@ -120,13 +136,15 @@ def _encoded_transform(input_otio):
 # @}
 
 
-# Map of functions for encoding OTIO objects to JSON.
-_ENCODER_MAP = {
-    opentime.RationalTime: _encoded_time,
-    opentime.TimeRange: _encoded_time_range,
-    opentime.TimeTransform: _encoded_transform,
-    SerializeableObject: _encoded_serializeable_object,
-}
+# Ordered list of functions for encoding OTIO objects to JSON.
+# More particular cases should precede more general cases.
+_ENCODER_LIST = [
+    (opentime.RationalTime, _encoded_time),
+    (opentime.TimeRange, _encoded_time_range),
+    (opentime.TimeTransform, _encoded_transform),
+    (UnknownSchema, _encoded_unknown_schema_object),
+    (SerializableObject, _encoded_serializable_object)
+]
 
 # @{ Decoders
 
@@ -155,7 +173,7 @@ def _decoded_transform(input_otio):
 
 # Map of explicit decoder functions to schema labels (for opentime)
 # because opentime is implemented with no knowledge of OTIO, it doesn't use the
-# same pattern as SerializeableObject.
+# same pattern as SerializableObject.
 _DECODER_FUNCTION_MAP = {
     'RationalTime.1': _decoded_time,
     'TimeRange.1': _decoded_time_range,
@@ -188,12 +206,7 @@ def _as_otio(dct):
 def deserialize_json_from_string(otio_string):
     """ Deserialize a string containing JSON to OTIO objects. """
 
-    json_data = json.loads(otio_string, object_hook=_as_otio)
-
-    if json_data is {}:
-        raise exceptions.CouldNotReadFileError
-
-    return json_data
+    return json.loads(otio_string, object_hook=_as_otio)
 
 
 def deserialize_json_from_file(otio_filepath):

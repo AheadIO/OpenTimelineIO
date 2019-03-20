@@ -33,12 +33,12 @@ from .. import (
 )
 
 
-class PythonPlugin(core.SerializeableObject):
+class PythonPlugin(core.SerializableObject):
     """A class of plugin that is encoded in a python module, exposed via a
     manifest.
     """
 
-    _serializeable_label = "PythonPlugin.1"
+    _serializable_label = "PythonPlugin.1"
 
     def __init__(
         self,
@@ -46,15 +46,15 @@ class PythonPlugin(core.SerializeableObject):
         execution_scope=None,
         filepath=None,
     ):
-        core.SerializeableObject.__init__(self)
+        super(PythonPlugin, self).__init__()
         self.name = name
         self.execution_scope = execution_scope
         self.filepath = filepath
         self._json_path = None
         self._module = None
 
-    name = core.serializeable_field("name", str, "Adapter name.")
-    execution_scope = core.serializeable_field(
+    name = core.serializable_field("name", str, "Adapter name.")
+    execution_scope = core.serializable_field(
         "execution_scope",
         str,
         doc=(
@@ -63,7 +63,7 @@ class PythonPlugin(core.SerializeableObject):
             "['in process', 'out of process']."
         )
     )
-    filepath = core.serializeable_field(
+    filepath = core.serializable_field(
         "filepath",
         str,
         doc=(
@@ -90,8 +90,8 @@ class PythonPlugin(core.SerializeableObject):
 
         return filepath
 
-    def _imported_module(self):
-        """Load the module this adapter points at."""
+    def _imported_module(self, namespace):
+        """Load the module this plugin points at."""
 
         pyname = os.path.splitext(os.path.basename(self.module_abs_path()))[0]
         pydir = os.path.dirname(self.module_abs_path())
@@ -101,7 +101,7 @@ class PythonPlugin(core.SerializeableObject):
         with file_obj:
             # this will reload the module if it has already been loaded.
             mod = imp.load_module(
-                "opentimelineio.adapters.{}".format(self.name),
+                "opentimelineio.{}.{}".format(namespace, self.name),
                 file_obj,
                 pathname,
                 description
@@ -113,7 +113,7 @@ class PythonPlugin(core.SerializeableObject):
         """Return the module object for this adapter. """
 
         if not self._module:
-            self._module = self._imported_module()
+            self._module = self._imported_module("adapters")
 
         return self._module
 
